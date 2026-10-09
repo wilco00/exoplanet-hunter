@@ -11,6 +11,7 @@ from pathlib import Path
 import lightkurve as lk
 import matplotlib.pyplot as plt
 import numpy as np
+from astroquery import log as astroquery_log
 
 DEFAULT_TARGET = "Kepler-10"  # KIC 11904151, host of Kepler-10b (period ~0.84 days)
 OUT_DIR = Path("plots")
@@ -35,7 +36,15 @@ def fetch(target: str, max_quarters: int | None, download_dir: str | None = None
         results = results[:max_quarters]
 
     log(f"Downloading {len(results)} quarter(s) (cached after the first run)...")
-    collection = results.download_all(download_dir=download_dir)
+    if verbose:
+        collection = results.download_all(download_dir=download_dir)
+    else:
+        # lightkurve's download_all hides astroquery's output by pointing sys.stdout at a devnull file
+        # and closing it afterwards. Two threads doing that at once can leave sys.stdout as a closed
+        # file, so every later print fails. Call the undecorated method (no swap) and quiet astroquery
+        # through its logger instead: it only draws progress bars at INFO level or below.
+        astroquery_log.setLevel("WARNING")
+        collection = type(results).download_all.__wrapped__(results, download_dir=download_dir)
     if collection is None or len(collection) == 0:
         raise ConnectionError(f"Download failed for '{target}'.")
 

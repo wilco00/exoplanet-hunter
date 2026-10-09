@@ -29,6 +29,7 @@ warnings.filterwarnings("ignore", message=".*oktopus.*")
 warnings.filterwarnings("ignore", category=RuntimeWarning)
 
 import joblib  # noqa: E402
+import lightkurve as lk  # noqa: E402
 import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 import torch  # noqa: E402
@@ -181,14 +182,31 @@ def demo_path(kepid: int):
     return DEMO_DIR / f"kic{int(kepid)}.npz"
 
 
+def cached_files(kepid: int) -> list:
+    """This star's downloaded long-cadence FITS files (same layout build_views.load_cached reads)."""
+    star_dir = CACHE_DIR / "mastDownload" / "Kepler"
+    return sorted(star_dir.glob(f"kplr{int(kepid):09d}_lc_*/*_llc.fits"))
+
+
 def has_local_data(kepid: int) -> bool:
     """True if this star loads without contacting MAST (showcase file or local FITS cache)."""
-    star_dir = CACHE_DIR / "mastDownload" / "Kepler"
-    return demo_path(kepid).exists() or any(star_dir.glob(f"kplr{int(kepid):09d}_lc_*/*_llc.fits"))
+    return demo_path(kepid).exists() or bool(cached_files(kepid))
 
 
 def kepid_of(name: str) -> int:
     return int(catalog().set_index("kepoi_name").at[name, "kepid"])
+
+
+def remove_unreadable(kepid: int) -> int:
+    """Delete cached FITS files that can't be read (truncated by an interrupted download)."""
+    removed = 0
+    for path in cached_files(kepid):
+        try:
+            lk.read(path)
+        except Exception:  # noqa: BLE001 -- any read failure means the file is unusable
+            path.unlink()
+            removed += 1
+    return removed
 
 
 def load_light_curve(kepid: int):
@@ -196,7 +214,12 @@ def load_light_curve(kepid: int):
     try:
         return load_cached(kepid)
     except FileNotFoundError:
-        return fetch(f"KIC {kepid}", None, download_dir=str(CACHE_DIR), verbose=False)
+        pass
+    except Exception:  # noqa: BLE001
+        # A cached file is unreadable, usually truncated by an interrupted download. lightkurve
+        # never re-downloads a file that already exists, so delete the broken ones first.
+        remove_unreadable(kepid)
+    return fetch(f"KIC {kepid}", None, download_dir=str(CACHE_DIR), verbose=False)
 
 
 @lru_cache(maxsize=8)
