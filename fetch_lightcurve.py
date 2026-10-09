@@ -25,7 +25,7 @@ def fetch(target: str, max_quarters: int | None, download_dir: str | None = None
     print(f"Searching MAST for {target}...")
     results = lk.search_lightcurve(target, mission="Kepler", author="Kepler", exptime=1800)
     if len(results) == 0:
-        raise SystemExit(f"No Kepler long-cadence light curves found for '{target}'.")
+        raise LookupError(f"No Kepler long-cadence light curves found for '{target}'.")
 
     print(f"Found {len(results)} quarter(s) of data.")
     if max_quarters:
