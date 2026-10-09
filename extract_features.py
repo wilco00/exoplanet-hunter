@@ -135,6 +135,13 @@ def extract_features(t, y, dy, period, t0, duration_days) -> dict:
 # ---------- Vetting plot ----------
 
 def plot_vetting(t, y, period, t0, duration_days, title: str, path) -> None:
+    fig = vetting_figure(t, y, period, t0, duration_days, title)
+    fig.savefig(path, dpi=150, facecolor=SURFACE)
+    plt.close(fig)
+    print(f"Saved {path}")
+
+
+def vetting_figure(t, y, period, t0, duration_days, title: str) -> plt.Figure:
     """Three panels: full transit, odd vs. even transits, and the phase-0.5 secondary window."""
     fig, axes = plt.subplots(1, 3, figsize=(15, 4.2), facecolor=SURFACE)
     flux = (y - 1.0) * 1e6
@@ -178,9 +185,7 @@ def plot_vetting(t, y, period, t0, duration_days, title: str, path) -> None:
 
     fig.suptitle(title, x=0.01, ha="left", color=INK, fontsize=12)
     fig.tight_layout()
-    fig.savefig(path, dpi=150, facecolor=SURFACE)
-    plt.close(fig)
-    print(f"Saved {path}")
+    return fig
 
 
 def main() -> None:

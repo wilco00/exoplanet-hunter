@@ -7,10 +7,14 @@ this file is only the page.
 Usage:
     streamlit run app.py
 """
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
 import streamlit as st
 
+from extract_features import vetting_figure
 from figures import fold_figure, light_curve_figure
-from inference import KoiResult, analyze, find_kois, training_kois
+from inference import KoiResult, analyze, feature_context, find_kois, training_kois
 
 DATASET_INFO = {  # badge color, label, what it means for trusting the verdict
     "train": ("gray", "Training set",
@@ -23,6 +27,29 @@ DATASET_INFO = {  # badge color, label, what it means for trusting the verdict
     "candidate": ("yellow", "Candidate",
                   "NASA hasn't decided on this one yet, so there's no true label to compare with."),
 }
+FEATURE_INFO = {  # feature -> (plain name, what it tells you)
+    "shape_ratio": ("Transit shape", "Edge depth ÷ center depth. Near 1 = flat-bottomed U (planet-like); "
+                    "well below 1 = V, typical of a grazing eclipsing binary."),
+    "duration_frac": ("Duration ÷ period", "Share of the orbit spent in transit. Large values suggest "
+                      "two big stars eclipsing each other."),
+    "depth_snr": ("Signal-to-noise", "How far the dip stands out from the noise."),
+    "n_transits": ("Number of transits", "How many transits the data covers (mostly reflects the period)."),
+    "secondary_ratio": ("Secondary ÷ primary", "Depth of any dip half an orbit later, relative to the main "
+                        "one. A real dip there means the object glows: likely a star."),
+    "noise_ppm": ("Noise", "Scatter of the out-of-transit data, in ppm."),
+    "secondary_snr": ("Secondary significance", "Signal-to-noise of the half-orbit dip."),
+    "duration_hours": ("Duration (h)", "How long each transit lasts."),
+    "depth_ppm": ("Depth (ppm)", "How much light is blocked, in parts per million."),
+    "odd_even_rel": ("Odd/even difference", "|odd − even depth| ÷ depth. A binary at half its true period "
+                     "alternates deep and shallow eclipses."),
+    "harmonic_dll": ("Sine-wave fit", "How much better a smooth sine fits than a transit. Positive = "
+                     "probably stellar variability."),
+    "period_days": ("Period (days)", "Time between transits."),
+    "odd_even_sigma": ("Odd/even significance", "Statistical significance of the odd/even difference."),
+    "max_single_frac": ("Single-event share", "Share of the signal from the strongest single transit. "
+                        "Near 1 = one glitch faking a periodic signal."),
+}
+TOP_FEATURES = 6
 MODELS = [  # (result attribute, card title, one-line description)
     ("prob_classic", "Classic", "Gradient-boosted trees on 14 vetting features"),
     ("prob_cnn", "CNN", "1D neural network on the folded light curve"),
@@ -98,6 +125,62 @@ def main() -> None:
         with col:
             verdict_card(r, attr, title, description)
     plots(r)
+    why(r)
+    vetting(r)
+
+
+def fmt(x: float) -> str:
+    if not np.isfinite(x):
+        return "n/a"
+    return f"{x:,.0f}" if abs(x) >= 1000 else f"{x:.3g}"
+
+
+def leaning(share: float) -> str:
+    if not np.isfinite(share):
+        return "Not measurable"
+    return "Planet-like" if share >= 0.7 else "False-positive-like" if share <= 0.3 else "Mixed"
+
+
+def why(r: KoiResult) -> None:
+    st.subheader("Why this verdict")
+    st.caption("Each row looks at one feature on its own: among the 50 training KOIs with the closest "
+               "value, what share were real planets? (The training set is about half planets, so 50% "
+               "means the feature says nothing.) Rows are sorted by how much the classic model relies "
+               "on each feature. The model weighs all 14 together, so this shows what the evidence "
+               "says, not exactly how the model combined it.")
+    ctx = feature_context(r)
+    table = pd.DataFrame({
+        "Feature": [FEATURE_INFO[f][0] for f in ctx["feature"]],
+        "This KOI": ctx["value"].map(fmt),
+        "Typical planet": ctx["planet_median"].map(fmt),
+        "Typical false positive": ctx["fp_median"].map(fmt),
+        "Similar KOIs that were planets": ctx["planet_share"],
+        "Reads as": ctx["planet_share"].map(leaning),
+        "Model reliance": ctx["importance"].clip(lower=0),
+    })
+    config = {
+        "Similar KOIs that were planets": st.column_config.ProgressColumn(
+            format="percent", min_value=0, max_value=1),
+        "Model reliance": st.column_config.ProgressColumn(
+            format="%.3f", min_value=0, max_value=float(table["Model reliance"].max()),
+            help="Drop in test-set ROC AUC when this feature is shuffled (permutation importance)"),
+    }
+    st.dataframe(table.head(TOP_FEATURES), column_config=config, hide_index=True, width="stretch")
+    with st.expander(f"All {len(table)} features"):
+        st.dataframe(table, column_config=config, hide_index=True, width="stretch")
+    with st.expander("What the features mean"):
+        st.markdown("\n".join(f"- **{FEATURE_INFO[f][0]}**: {FEATURE_INFO[f][1]}" for f in ctx["feature"]))
+
+
+def vetting(r: KoiResult) -> None:
+    st.subheader("Vetting checks")
+    st.caption("Three classic tests for impostors. Left: the transit itself. Middle: odd-numbered vs. "
+               "even-numbered transits; if they differ, it's likely two stars eclipsing each other, "
+               "seen at half the true period. Right: half an orbit after the transit; a dip there means "
+               "the companion gives off its own light, so it's a star, not a planet.")
+    fig = vetting_figure(r.t, r.y, r.period, r.t0, r.duration, r.kepoi_name)
+    st.pyplot(fig)
+    plt.close(fig)
 
 
 def plots(r: KoiResult) -> None:

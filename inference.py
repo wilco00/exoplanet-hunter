@@ -35,13 +35,14 @@ import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 import torch  # noqa: E402
 from astroquery.mast import Observations  # noqa: E402
+from sklearn.inspection import permutation_importance  # noqa: E402
 
 from build_features import CACHE_DIR, FEATURES_PATH, MIN_TRANSITS  # noqa: E402
 from build_koi_list import MAX_DURATION_HOURS  # noqa: E402
 from build_views import load_cached, make_views  # noqa: E402
 from extract_features import extract_features, koi_data, load_catalog, prepare_star, star_ephemerides  # noqa: E402
 from fetch_lightcurve import fetch  # noqa: E402
-from train_classifier import FULL_FEATURES, MODEL_DIR, SPLIT_PATH  # noqa: E402
+from train_classifier import FULL_FEATURES, MODEL_DIR, SEED, SPLIT_PATH  # noqa: E402
 from train_cnn import CNN_PREDICTIONS, TransitCNN, as_tensor, predict  # noqa: E402
 
 # astroquery reads its 600 s search timeout once at import, so set it on the live connection.
@@ -110,6 +111,43 @@ def dataset_of(name: str, kepid: int, disposition: str) -> str:
     if name in names:
         return split[kepid]
     return "candidate" if disposition == "CANDIDATE" else "unseen"
+
+
+@cache
+def labeled_features() -> pd.DataFrame:
+    """features.csv with each row's train/test split attached."""
+    df = pd.read_csv(FEATURES_PATH).replace([np.inf, -np.inf], np.nan)
+    return df.assign(split=df["kepid"].map(training_kois()[1]))
+
+
+@cache
+def feature_importance() -> pd.Series:
+    """Drop in test-set ROC AUC when each feature is shuffled (same recipe as train_classifier.py),
+    most important first."""
+    classic, _ = models()
+    test = labeled_features().query("split == 'test'")
+    result = permutation_importance(classic["model"], test[classic["features"]], test["label"],
+                                    scoring="roc_auc", n_repeats=20, random_state=SEED)
+    return pd.Series(result.importances_mean, index=classic["features"]).sort_values(ascending=False)
+
+
+def feature_context(r: KoiResult, k: int = 50) -> pd.DataFrame:
+    """For each feature on its own: this KOI's value, typical planet / false-positive values, and
+    the share of planets among the k training KOIs with the closest value (excluding this KOI).
+    One feature at a time, so it shows what the evidence says, not exactly how the model combined it."""
+    train = labeled_features().query("split == 'train' and kepoi_name != @r.kepoi_name")
+    features = r.features
+    rows = []
+    for feature, importance in feature_importance().items():
+        value, col = features[feature], train[[feature, "label"]].dropna()
+        nearest = col.iloc[(col[feature] - value).abs().argsort()[:k]] if np.isfinite(value) else None
+        rows.append({
+            "feature": feature, "value": value, "importance": importance,
+            "planet_median": col.loc[col["label"] == 1, feature].median(),
+            "fp_median": col.loc[col["label"] == 0, feature].median(),
+            "planet_share": nearest["label"].mean() if nearest is not None else np.nan,
+        })
+    return pd.DataFrame(rows)
 
 
 # ---------- Lookup ----------

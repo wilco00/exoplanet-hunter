@@ -1,0 +1,8 @@
+# Accent color = dataviz reference palette blue (categorical slot 1), so progress bars and
+# accents never read as red "danger". Set per mode: a plain [theme] primaryColor would pin
+# the app to a light custom theme and ignore the viewer's dark-mode setting.
+[theme.light]
+primaryColor = "#2a78d6"
+
+[theme.dark]
+primaryColor = "#3987e5"
