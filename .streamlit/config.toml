@@ -6,3 +6,7 @@ primaryColor = "#2a78d6"
 
 [theme.dark]
 primaryColor = "#3987e5"
+
+[client]
+# hide the developer "Deploy" menu; viewers only need the page
+toolbarMode = "minimal"

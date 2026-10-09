@@ -190,7 +190,8 @@ def main() -> None:
                 "Two models trained on 1,000 labeled signals give their verdicts.")
 
     sidebar()
-    st.session_state.setdefault("query", "K00072.01")
+    # A ?koi=K01262.01 link opens that KOI (shareable links, headless screenshots)
+    st.session_state.setdefault("query", st.query_params.get("koi", "K00072.01"))
     query = st.text_input("KOI, KIC or Kepler name", key="query",
                           help="Examples: K00072.01, KOI-72, KIC 11904151, Kepler-10 b")
     names = find_kois(query) if query.strip() else []

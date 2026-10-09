@@ -10,8 +10,7 @@ data/lightkurve_cache/
 data/views/
 data/views.npz
 
-# Trained models are small but regenerable; un-ignore if the dashboard deploy needs them
-models/
+# Trained models (models/, 1.2 MB) are tracked so a fresh clone can run the dashboard
 
 # OS / editor
 .DS_Store
