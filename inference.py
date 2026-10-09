@@ -60,6 +60,7 @@ class KoiResult:
     period: float               # days
     t0: float                   # mid-transit time, BKJD
     duration: float             # days
+    ephemerides: dict           # every KOI on this star: name -> (period, t0, duration days)
     star_t: np.ndarray          # whole star, cleaned (all KOIs still in)
     star_y: np.ndarray
     t: np.ndarray               # this KOI only (other KOIs' transits removed)
@@ -183,7 +184,7 @@ def analyze(name: str) -> KoiResult:
         kepoi_name=name, kepid=kepid, kepler_name=kepler_name,
         disposition=row["koi_disposition"],
         dataset=dataset_of(name, kepid, row["koi_disposition"]),
-        period=period, t0=t0, duration=duration,
+        period=period, t0=t0, duration=duration, ephemerides=ephemerides,
         star_t=star_t, star_y=star_y, t=t, y=y,
         features=features, global_view=global_view, local_view=local_view,
         prob_classic=prob_classic, prob_cnn=prob_cnn, warnings=notes,

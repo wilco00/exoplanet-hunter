@@ -9,6 +9,7 @@ Usage:
 """
 import streamlit as st
 
+from figures import fold_figure, light_curve_figure
 from inference import KoiResult, analyze, find_kois, training_kois
 
 DATASET_INFO = {  # badge color, label, what it means for trusting the verdict
@@ -96,6 +97,29 @@ def main() -> None:
     for col, (attr, title, description) in zip(st.columns(3), MODELS):
         with col:
             verdict_card(r, attr, title, description)
+    plots(r)
+
+
+def plots(r: KoiResult) -> None:
+    theme = "dark" if st.context.theme.type == "dark" else "light"
+    config = {"displaylogo": False}
+
+    st.subheader("Light curve")
+    note = ""
+    if r.features["depth_ppm"] < r.features["noise_ppm"]:
+        note = (f" This dip ({r.features['depth_ppm']:.0f} ppm) is smaller than the scatter of a single "
+                f"measurement ({r.features['noise_ppm']:.0f} ppm), so it can't be seen here; "
+                "the folded view below reveals it.")
+    st.caption("The star's brightness over Kepler's four years, after removing slow drifts. "
+               "Highlighted points fall inside this KOI's predicted transits; drag to zoom, "
+               "double-click to reset." + note)
+    st.plotly_chart(light_curve_figure(r, theme), theme=None, config=config, width="stretch")
+
+    st.subheader("Folded transit")
+    st.caption(f"All {r.features['n_transits']} transits stacked on top of each other using the "
+               f"catalog period ({r.period:.4f} d), so the dip stands out from the noise. "
+               "A planet usually gives a flat-bottomed U; a grazing eclipsing binary gives a V.")
+    st.plotly_chart(fold_figure(r, theme), theme=None, config=config, width="stretch")
 
 
 main()
