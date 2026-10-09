@@ -57,10 +57,42 @@ average sides with the trees.
 
 ## Candidates
 
-<!-- TODO: fill in after score_candidates.py finishes: how many flagged, agreement between models,
-     comparison with NASA's Robovetter score, top-flagged list. -->
+NASA lists 1,873 signals as CANDIDATE: they passed NASA's automated vetting (the Robovetter) but were never
+confirmed or ruled out. The pipeline scored 1,871 of them (2 have no usable data around their transits).
+The ensemble calls 571 (31%) planets.
 
-*Results pending: the scoring run over all 1,873 candidates is in progress.*
+**That 31% says more about the training data than about the candidates.** Confirming a planet takes follow-up
+observations, which favor strong signals, so the training set has almost no faint real planets. Of the 79 training
+signals with a signal-to-noise ratio (SNR) of 10 or less, only 3 were planets. The models learned that faint
+means false positive, and most candidates are faint (median SNR 12.4, against 35.8 for training planets):
+
+![Planet share by signal-to-noise: training labels vs. candidate verdicts](plots/candidates_snr.png)
+
+In every SNR band, the share of candidates called planets tracks the share of training signals that were planets.
+All 559 candidates with SNR ≤ 10 are rejected, although NASA's Robovetter scores them 0.75 on average. The two
+models also disagree more on candidates than on the test set (they agree on 74% vs. 89%), another sign of inputs
+unlike the training data.
+
+**Where the verdicts can be trusted (SNR > 15), they mostly line up with NASA's vetting.** The ensemble flags
+370 candidates. Where NASA has a Robovetter score, it agrees with 315 of our 349 "planet" calls (90%). The
+agreement is lopsided: the Robovetter also passes 145 of the 236 strong-signal candidates we reject. The full
+list is in [`data/candidates_flagged.csv`](data/candidates_flagged.csv). The top ten:
+
+| KOI | Ensemble | Trees | CNN | Robovetter | Period (d) | Depth (ppm) | SNR |
+|---|---|---|---|---|---|---|---|
+| K00268.01 | 0.993 | 0.998 | 0.988 | 1.00 | 110.38 | 440 | 235 |
+| K05384.01 | 0.989 | 0.996 | 0.982 | 1.00 | 7.95 | 5,259 | 363 |
+| K01328.01 | 0.988 | 0.996 | 0.981 | 0.91 | 80.97 | 3,861 | 51 |
+| K00211.01 | 0.986 | 0.996 | 0.977 | 1.00 | 124.04 | 6,303 | 195 |
+| K00522.01 | 0.986 | 0.999 | 0.973 | 1.00 | 12.83 | 1,187 | 95 |
+| K00212.01 | 0.986 | 0.997 | 0.975 | 1.00 | 5.70 | 4,119 | 453 |
+| K01597.01 | 0.986 | 0.996 | 0.975 | 1.00 | 7.80 | 313 | 140 |
+| K00865.01 | 0.985 | 0.996 | 0.975 | 1.00 | 119.02 | 6,040 | 244 |
+| K00501.01 | 0.982 | 0.999 | 0.966 | 1.00 | 24.80 | 502 | 47 |
+| K02577.01 | 0.980 | 0.994 | 0.967 | 1.00 | 18.56 | 481 | 95 |
+
+These are model scores, not discoveries. Settling any of them takes observations beyond a light curve, such as
+ruling out a blended neighbor star (finding 2).
 
 ## Dashboard
 
@@ -106,6 +138,8 @@ More detail on methods, design decisions and errors: [WRITEUP.md](WRITEUP.md).
 ## Limitations
 
 - **Brightness only.** No pixel or centroid data, so blended background binaries fool it (finding 2).
+- **Biased toward strong signals.** Training planets are mostly high-SNR, so the models reject nearly every faint
+  signal; below SNR ~15 a verdict mostly reflects that bias (see [Candidates](#candidates)).
 - **Small training set** (1,000 signals) and a single CNN training run.
 - **The labels come largely from NASA's own vetting**, so the models partly learn to imitate it. Agreement with
   NASA is not independent proof of being right.
@@ -136,7 +170,7 @@ curves (several hours, resumable):
 
 ```
 build_koi_list.py → build_features.py → train_classifier.py → build_views.py → train_cnn.py
-                  → build_demo.py → score_candidates.py → robovetter.py
+                  → build_demo.py → score_candidates.py → robovetter.py → analyze_candidates.py
 ```
 
 ## Project layout
@@ -150,7 +184,8 @@ build_koi_list.py → build_features.py → train_classifier.py → build_views.
 | `build_views.py`, `train_cnn.py` | CNN inputs and the two-branch 1D CNN |
 | `inference.py` | Scores any catalog signal end to end (shared by dashboard and batch) |
 | `app.py`, `figures.py`, `build_demo.py` | Streamlit dashboard, its charts, and the showcase data |
-| `score_candidates.py`, `robovetter.py` | Candidate scoring, comparison with NASA's vetting flags |
+| `score_candidates.py`, `analyze_candidates.py` | Score all candidates; SNR analysis and the flagged list |
+| `robovetter.py` | NASA's vetting flags and scores; analysis of the models' mistakes |
 
 ## Credits
 
