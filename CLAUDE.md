@@ -26,11 +26,14 @@ Owner: Will (UGA CS, Dec 2026). Windows, PowerShell, Python venv at `.venv/`.
 | 5 | Classic classifier (gradient-boosted trees) | Done |
 | 6a | CNN input views (global 2001 + local 201 bins) | Done: 994 KOIs |
 | 6b | 1D CNN (AstroNet-lite, PyTorch) + ensemble | Done (first run). Optional tuning next |
-| 7 | Web dashboard: enter a KIC/KOI, see the light curve, fold and both models' verdicts | **Next** |
-| 8 | Polish: README/write-up, deploy, run models on the 1,873 held-out CANDIDATE KOIs ("what my model flagged") | Not started |
+| 7 | Web dashboard: enter a KIC/KOI, see the light curve, fold and both models' verdicts | Done: Streamlit, runs locally |
+| 8 | Polish: README/write-up, deploy, run models on the 1,873 held-out CANDIDATE KOIs ("what my model flagged") | **Next** |
 
-**Open decision for milestone 7:** Streamlit (all Python, fastest) vs. FastAPI + separate
-frontend (more work, stronger software-engineering signal). Ask Will before building.
+**Milestone 7 scope (agreed with Will):** Streamlit, chosen over FastAPI + frontend for speed. The science lives in a
+UI-agnostic `inference.py`, so a FastAPI layer could be added later without a rewrite. Input is any catalog KOI
+(catalog ephemeris, same as training); arbitrary KICs with no KOI (our own BLS) were left out. Data comes from the
+local cache, else a live MAST download, plus a precomputed showcase set. Page sections: verdict cards, dataset
+badge with true label, light curve, fold, "why this verdict" feature table, vetting plot.
 
 ## Results so far (test set: 196 KOIs on 189 stars, never used in training)
 
@@ -47,6 +50,13 @@ frontend (more work, stronger software-engineering signal). Ask Will before buil
 - Most confident classic mistakes are false positives the model is ~99% sure are planets
   (K01262.01, K02969.01, K00403.01, ...). The likely cause is blended background eclipsing binaries, which
   can't be seen from flux alone (they need centroid/pixel data). This is unconfirmed; worth stating as a limitation.
+  The dashboard backs it up: every top K01262.01 feature reads planet-like and it passes all three vetting checks.
+- Permutation importance (test AUC drop): `shape_ratio` 0.142, `duration_frac` 0.028, `depth_snr` 0.017,
+  `n_transits` 0.008, `secondary_ratio` 0.006; the odd/even features are ~0.002 or less.
+- The ensemble can be worse than its better half: on K00403.01 the CNN is right (0.23) but the ensemble says
+  planet (0.61).
+- K01133.01's eclipse depth rises and falls on a ~370-day cycle (Kepler's seasonal rolls put the star on
+  different pixels), which hints at light from a neighboring star. Unverified.
 
 ## Scripts (run from the project root, in this order)
 
@@ -61,6 +71,9 @@ frontend (more work, stronger software-engineering signal). Ask Will before buil
 | `train_classifier.py` | Star-level 80/20 split (saved), 5-fold grouped CV, baseline vs. full HistGradientBoosting, permutation importance | `data/split.csv`, `models/classic_full.joblib`, `data/test_predictions_classic.csv`, `plots/classic_results.png` |
 | `build_views.py` | Global/local views from the **local cache** (no network), resumable | `data/views/*.npz`, `data/views.npz`, `plots/view_examples.png` |
 | `train_cnn.py` | Two-branch 1D CNN, flip augmentation, early stopping on a 15% validation split of training stars; scores classic/CNN/ensemble on the same test KOIs | `models/cnn.pt`, `data/test_predictions_cnn.csv`, `plots/cnn_results.png` |
+| `inference.py` | Dashboard engine: `find_kois(query)` (KOI / KIC / Kepler name), `analyze(koi)` -> `KoiResult` (same path as training), `dataset_of` (train/test/unseen/candidate), `feature_context` + `feature_importance`. CLI: `python inference.py Kepler-10`; `--parity` re-scores the 196 test KOIs and must match saved results exactly | — |
+| `build_demo.py` | Saves the 10 showcase KOIs' cleaned light curves; verifies they re-score identically | `data/demo/kic<KIC>.npz`, `data/demo/showcase.csv` |
+| `app.py` + `figures.py` | Streamlit page (`figures.py` = Plotly light curve + fold). Run `.venv\Scripts\python.exe -m streamlit run app.py`, or the `dashboard` entry in `.claude/launch.json` (port 8501) | — |
 
 ## Key design decisions (and why)
 
@@ -73,6 +86,17 @@ frontend (more work, stronger software-engineering signal). Ask Will before buil
   SNR ~270) a 1% difference is "significant", so sigma-only tests misfire on bright real planets.
 - **Mask other KOIs** on the same star from both the trend fit and the per-KOI features.
 - Plots use the dataviz skill's reference palette (blue `#2a78d6`, orange `#eb6834`, aqua `#1baf7a`, neutral ink).
+  The dashboard uses its light **and** dark steps (dark: blue `#3987e5`, orange `#d95926`), following Streamlit's theme.
+- **Dashboard = training pipeline, verified.** `inference.analyze` reuses `prepare_star` / `koi_data` /
+  `extract_features` / `make_views`. `python inference.py --parity` must stay exact (it is: features identical,
+  classic 1e-16, CNN 2e-7). Re-run it after touching any of those.
+- **Dataset badge has four cases:** train, test, *unseen* (one of ~6,500 labeled KOIs outside our 1,000, so a
+  fair out-of-sample check), candidate. An unseen KOI on a training star gets a note (the models saw that star).
+- **"Why this verdict"** = per feature, the share of planets among the 50 nearest training KOIs (excluding itself),
+  rows sorted by permutation importance computed at startup. One feature at a time, not a model attribution.
+- **Showcase data is full float64** (~1 MB/star, 8.9 MB total) so demo results match the full pipeline exactly.
+- **Analyses run in a worker thread with a 90 s wait** (`app.run_analysis`). Slow jobs keep running and are picked
+  up on retry; failed jobs are retried rather than cached.
 
 ## Data layout
 
@@ -87,28 +111,49 @@ data/
   test_predictions_*.csv    per-KOI test probabilities
   lightkurve_cache/         ~6 GB raw FITS, mastDownload/Kepler/kplr<9-digit KIC>_lc_*/ *_llc.fits  (gitignored)
   views/, views.npz         CNN inputs (gitignored, regenerable in minutes)
-models/                     classic_full.joblib, cnn.pt, *_metrics.json (gitignored)
+  demo/                     showcase stars' cleaned light curves + showcase.csv (tracked; build_demo.py)
+models/                     classic_full.joblib, cnn.pt, *_metrics.json (gitignored; a deploy needs them)
 plots/                      all figures (tracked; useful for the README)
+.streamlit/config.toml      dashboard accent color, per light/dark theme
+.claude/launch.json         `dashboard` server entry (runOnSave on)
 ```
 
 ## Gotchas
 
 - **MAST timeouts:** downloads occasionally hang for the full 600 s astroquery timeout. 4 of the 6 failures were
   timeouts (retryable with `python build_features.py --retry-failed`); 2 had no data near the catalog ephemeris.
-  If timeouts become frequent, lower astroquery's MAST timeout instead of waiting 10 min per stall.
+  astroquery reads its *search* timeout once at import, so `inference.py` sets
+  `Observations._portal_api_connection.TIMEOUT = 90` directly. *File downloads* have no timeout at all
+  (`timeout=None`), which is why the app wraps analyses in a timed worker thread.
+- **Python 3.11: `concurrent.futures.TimeoutError is TimeoutError`** (an `OSError`), the same class MAST raises.
+  `app.run_analysis` checks `job.done()` to tell "we stopped waiting" from "MAST timed out".
 - **Retrying failures changes the star set:** newly recovered stars aren't in `split.csv`, and
   `train_classifier.py` will then make a NEW split (changing all reported numbers). If you retry, assign the
   new stars to `train` in `split.csv` rather than regenerating it.
 - **Windows file locks:** `savefig` fails with `OSError [Errno 22] Invalid argument` if the PNG is open in a
   viewer. Close it and re-run (resumable scripts skip finished work).
-- `fetch()` prints progress; `build_features.py` silences it with `redirect_stdout`.
+- `fetch()` prints progress unless `verbose=False` (the app's setting: `redirect_stdout` swaps `sys.stdout`
+  process-wide, so it isn't thread-safe). `build_features.py` still uses `redirect_stdout` (single-threaded, fine).
+  `fetch()` raises `LookupError` (no data) and `ConnectionError` (download failed), not `SystemExit`.
+- **Streamlit:** restart the server after changing `.streamlit/config.toml`. A plain `[theme] primaryColor`
+  pins the app to light mode; use `[theme.light]` / `[theme.dark]`. Plotly WebGL traces (`Scattergl`) draw above
+  SVG traces, so a line meant to sit on top of WebGL points must also be `Scattergl`.
+- **Rebuild the showcase** (`python build_demo.py`) after changing the cleaning step or refreshing the catalog:
+  `cleaned_star` prefers `data/demo/` files over the cache, so stale ones would silently win.
+- `python extract_features.py --koi ...` re-saves a tracked PNG in `plots/` (output is deterministic, so no diff).
 - lightkurve emits an "oktopus" warning on import; it's harmless and filtered in each script.
 - Known cosmetic issues for polish: in `*_bls.png` the dashed best-period line hides signal 2's peak, and
-  outliers stretch the y-axis on the 10b fold.
+  outliers stretch the y-axis on the 10b fold. In the dashboard's dark mode the matplotlib vetting plot stays a
+  light panel (port it to Plotly to fix).
 
 ## Ideas noted for later
 
 - CNN: average several seeds (single-seed scores are noisy); add odd/even and secondary-eclipse views (as in
   later AstroNet variants); tune threshold on the validation set.
 - Milestone 8 needs features and views for `candidates.csv`: generalize `build_features.py`/`build_views.py`
-  to take a KOI list (~1,800 more stars to download, likely another overnight run).
+  to take a KOI list (~1,800 more stars to download, likely another overnight run). `inference.analyze` already
+  scores any catalog KOI end-to-end and could drive this batch instead.
+- Deploy (milestone 8): Streamlit Community Cloud is the obvious target. It needs `models/` committed (or
+  downloaded at startup). Showcase KOIs work without the FITS cache; anything else downloads live.
+- Dashboard: SHAP per-prediction attributions; accept arbitrary KICs via our own BLS search; a weighted or stacked
+  ensemble instead of a plain mean.
