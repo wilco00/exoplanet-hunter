@@ -1,0 +1,20 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# Large or regenerable data (rebuild with the scripts; see CLAUDE.md)
+# ~6 GB of raw Kepler FITS files (build_features.py)
+data/lightkurve_cache/
+# CNN inputs (build_views.py)
+data/views/
+data/views.npz
+
+# Trained models are small but regenerable; un-ignore if the dashboard deploy needs them
+models/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

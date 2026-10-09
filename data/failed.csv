@@ -1,0 +1,7 @@
+kepid,kepoi_name,error
+2445129,K00793.01,TimeoutError: Timeout limit of 600 exceeded.
+2445154,K01023.01,TimeoutError: Timeout limit of 600 exceeded.
+3245969,K01101.01,ValueError: zero-size array to reduction operation minimum which has no identity
+3836375,K00807.01,"ReadTimeout: HTTPSConnectionPool(host='mast.stsci.edu', port=443): Read timed out. (read timeout=None)"
+3848665,K05014.01,"ReadTimeout: HTTPSConnectionPool(host='mast.stsci.edu', port=443): Read timed out. (read timeout=None)"
+5271803,K06549.01,"ValueError: cannot reshape array of size 0 into shape (0,newaxis)"
