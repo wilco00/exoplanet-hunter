@@ -7,14 +7,22 @@ this file is only the page.
 Usage:
     streamlit run app.py
 """
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as WaitTimeout
+
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import streamlit as st
 
+from build_demo import SHOWCASE_PATH
 from extract_features import vetting_figure
 from figures import fold_figure, light_curve_figure
-from inference import KoiResult, analyze, feature_context, find_kois, training_kois
+from inference import (KoiResult, analyze, feature_context, find_kois, has_local_data, kepid_of,
+                       training_kois)
+
+WAIT_SECONDS = 90   # how long the page waits on a MAST download before offering a retry
+MAX_KEPT = 32       # finished analyses kept in memory (~2 MB each)
 
 DATASET_INFO = {  # badge color, label, what it means for trusting the verdict
     "train": ("gray", "Training set",
@@ -57,9 +65,83 @@ MODELS = [  # (result attribute, card title, one-line description)
 ]
 
 
-@st.cache_resource(show_spinner=False)
-def cached_analyze(name: str) -> KoiResult:
-    return analyze(name)
+class StillRunning(Exception):
+    """The analysis is still going (usually a slow MAST download); it keeps running in the background."""
+
+
+@st.cache_resource
+def worker_pool() -> ThreadPoolExecutor:
+    return ThreadPoolExecutor(max_workers=4)
+
+
+@st.cache_resource
+def jobs() -> dict:
+    """KOI name -> Future, shared by every visitor: finished jobs double as a result cache, and
+    a slow download that outlives one page load is picked up again instead of restarted."""
+    return {}
+
+
+def run_analysis(name: str) -> KoiResult:
+    """analyze() in a worker thread, waiting at most WAIT_SECONDS. astroquery's file downloads
+    have no timeout of their own, so without this a stalled download would hang the page."""
+    pending = jobs()
+    job = pending.get(name)
+    if job is None or (job.done() and job.exception() is not None):  # new, or retry a failure
+        job = pending[name] = worker_pool().submit(analyze, name)
+        finished = [n for n, j in pending.items() if j.done()]
+        for old in finished[:-MAX_KEPT]:
+            del pending[old]
+    try:
+        return job.result(timeout=WAIT_SECONDS)
+    except WaitTimeout:
+        # On Python 3.11+ this is also the class MAST raises, so check whether *we* gave up waiting
+        if not job.done():
+            raise StillRunning from None
+        raise
+
+
+@st.cache_data
+def showcase() -> pd.DataFrame:
+    return pd.read_csv(SHOWCASE_PATH) if SHOWCASE_PATH.exists() else pd.DataFrame(
+        columns=["kepoi_name", "title", "why"])
+
+
+def pick(name: str) -> None:
+    st.session_state["query"] = name
+
+
+def sidebar() -> None:
+    st.sidebar.header("Showcase")
+    st.sidebar.caption("Hand-picked KOIs that load instantly, including the models' mistakes.")
+    for row in showcase().itertuples():
+        st.sidebar.button(f"{row.title} · {row.kepoi_name}", key=f"show_{row.kepoi_name}",
+                          help=row.why, on_click=pick, args=(row.kepoi_name,), width="stretch")
+
+
+def load(name: str) -> KoiResult | None:
+    """run_analysis() with a spinner and a plain-language message for every way it can fail."""
+    local = has_local_data(kepid_of(name))
+    message = (f"Analyzing {name}..." if local else
+               f"Downloading {name}'s light curve from NASA's MAST archive (usually 10–60 s)...")
+    try:
+        with st.spinner(message):
+            return run_analysis(name)
+    except StillRunning:
+        st.warning(f"MAST is slow right now: {name} is still downloading after {WAIT_SECONDS} s. "
+                   "It keeps going in the background, so try again in a minute "
+                   "(or pick a showcase KOI from the sidebar).")
+        st.button("Try again")
+    except LookupError as e:
+        st.error(f"MAST has no Kepler data for this star. ({e})")
+    except ValueError as e:
+        st.error(f"Not enough usable data around {name}'s transits to analyze it. ({e})")
+    except OSError as e:  # includes TimeoutError and requests' connection errors
+        st.error(f"Couldn't reach MAST ({type(e).__name__}: {e}). Try again, or pick a showcase KOI.")
+    except Exception as e:  # noqa: BLE001 -- the page should explain, not crash
+        st.error(f"Unexpected error while analyzing {name}: {type(e).__name__}: {e}")
+        with st.expander("Details"):
+            st.exception(e)
+    return None
 
 
 def verdict_card(r: KoiResult, attr: str, title: str, description: str) -> None:
@@ -82,6 +164,10 @@ def header(r: KoiResult) -> None:
     st.caption(f"KIC {r.kepid} · period {r.period:.4f} d · duration {r.duration * 24:.2f} h · "
                f"{r.features['n_transits']} transits · depth {r.features['depth_ppm']:.0f} ppm")
 
+    picks = showcase().set_index("kepoi_name")
+    if r.kepoi_name in picks.index:
+        st.markdown(f"**Showcase:** {picks.at[r.kepoi_name, 'why']}")
+
     color, label, meaning = DATASET_INFO[r.dataset]
     st.markdown(f":{color}-badge[{label}] &nbsp; NASA disposition: **{r.disposition}**")
     st.caption(meaning)
@@ -103,7 +189,9 @@ def main() -> None:
     st.markdown("Is a Kepler transit signal a real planet or a false positive? "
                 "Two models trained on 1,000 labeled signals give their verdicts.")
 
-    query = st.text_input("KOI, KIC or Kepler name", value="K00072.01",
+    sidebar()
+    st.session_state.setdefault("query", "K00072.01")
+    query = st.text_input("KOI, KIC or Kepler name", key="query",
                           help="Examples: K00072.01, KOI-72, KIC 11904151, Kepler-10 b")
     names = find_kois(query) if query.strip() else []
     if not names:
@@ -113,11 +201,8 @@ def main() -> None:
     name = names[0] if len(names) == 1 else st.radio(
         f"This star has {len(names)} KOIs", names, horizontal=True)
 
-    try:
-        with st.spinner(f"Loading and cleaning {name}'s light curve (a new star downloads from MAST)..."):
-            r = cached_analyze(name)
-    except (LookupError, TimeoutError, ValueError, ConnectionError) as e:
-        st.error(f"Couldn't analyze {name}: {e}")
+    r = load(name)
+    if r is None:
         return
 
     header(r)

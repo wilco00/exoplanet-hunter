@@ -1,0 +1,11 @@
+kepoi_name,title,why
+K00072.01,Kepler-10 b,"Kepler's first confirmed rocky planet, on a 20-hour orbit. In the training set."
+K00072.02,Kepler-10 c,"Same star, much wider orbit. Never trained on, though its star's light curve was."
+K00289.01,Kepler-511 c,A test-set planet the models call correctly and confidently.
+K01133.01,Eclipsing binary,"Classic V-shaped eclipse, and its depth changes with Kepler's seasons."
+K06662.01,Glowing companion,Test-set false positive with a clear dip half an orbit later: the companion is a star.
+K01262.01,Confident mistake,Test-set false positive that every model calls a planet; nothing in the brightness data gives it away.
+K02034.02,Missed planet,A real planet (Kepler-1065 c) that both models reject; its half-orbit window shows a dip.
+K00403.01,Models disagree,"The trees say planet, the CNN says false positive. The CNN is right."
+K01439.01,Very long transit,"A 24-hour transit, longer than anything in training, so the verdict comes with a warning."
+K00753.01,Undecided candidate,NASA hasn't ruled on this one yet; there's no right answer to check against.

@@ -19,8 +19,6 @@ Usage:
     python inference.py --parity          # re-score the test set, compare with saved results
 """
 import argparse
-import contextlib
-import io
 import re
 import time
 import warnings
@@ -38,7 +36,7 @@ from astroquery.mast import Observations  # noqa: E402
 from sklearn.inspection import permutation_importance  # noqa: E402
 
 from build_features import CACHE_DIR, FEATURES_PATH, MIN_TRANSITS  # noqa: E402
-from build_koi_list import MAX_DURATION_HOURS  # noqa: E402
+from build_koi_list import DATA_DIR, MAX_DURATION_HOURS  # noqa: E402
 from build_views import load_cached, make_views  # noqa: E402
 from extract_features import extract_features, koi_data, load_catalog, prepare_star, star_ephemerides  # noqa: E402
 from fetch_lightcurve import fetch  # noqa: E402
@@ -49,6 +47,9 @@ from train_cnn import CNN_PREDICTIONS, TransitCNN, as_tensor, predict  # noqa: E
 # (File downloads have no timeout at all in astroquery; nothing we can do about those here.)
 MAST_TIMEOUT = 90
 Observations._portal_api_connection.TIMEOUT = MAST_TIMEOUT
+
+# Showcase stars' cleaned light curves (build_demo.py): instant, and work without the 6 GB cache
+DEMO_DIR = DATA_DIR / "demo"
 
 
 @dataclass
@@ -176,19 +177,36 @@ def find_kois(query: str) -> list[str]:
 
 # ---------- Pipeline ----------
 
+def demo_path(kepid: int):
+    return DEMO_DIR / f"kic{int(kepid)}.npz"
+
+
+def has_local_data(kepid: int) -> bool:
+    """True if this star loads without contacting MAST (showcase file or local FITS cache)."""
+    star_dir = CACHE_DIR / "mastDownload" / "Kepler"
+    return demo_path(kepid).exists() or any(star_dir.glob(f"kplr{int(kepid):09d}_lc_*/*_llc.fits"))
+
+
+def kepid_of(name: str) -> int:
+    return int(catalog().set_index("kepoi_name").at[name, "kepid"])
+
+
 def load_light_curve(kepid: int):
     """Local cache first (instant); otherwise download from MAST into the same cache."""
     try:
         return load_cached(kepid)
     except FileNotFoundError:
-        with contextlib.redirect_stdout(io.StringIO()):  # keep fetch()'s progress chatter quiet
-            return fetch(f"KIC {kepid}", None, download_dir=str(CACHE_DIR))
+        return fetch(f"KIC {kepid}", None, download_dir=str(CACHE_DIR), verbose=False)
 
 
 @lru_cache(maxsize=8)
 def cleaned_star(kepid: int):
-    """(ephemerides, t, y, dy) for a star, cleaned once with every KOI masked from the trend."""
+    """(ephemerides, t, y, dy) for a star, cleaned once with every KOI masked from the trend.
+    Showcase stars load their saved cleaned arrays instead (identical, see build_demo.py)."""
     ephemerides = star_ephemerides(kepid, catalog())
+    if demo_path(kepid).exists():
+        saved = np.load(demo_path(kepid))
+        return ephemerides, saved["t"], saved["y"], saved["dy"]
     return (ephemerides, *prepare_star(load_light_curve(kepid), ephemerides))
 
 

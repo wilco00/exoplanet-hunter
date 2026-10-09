@@ -17,24 +17,27 @@ OUT_DIR = Path("plots")
 ZOOM_DAYS = 5
 
 
-def fetch(target: str, max_quarters: int | None, download_dir: str | None = None) -> lk.LightCurve:
+def fetch(target: str, max_quarters: int | None, download_dir: str | None = None,
+          verbose: bool = True) -> lk.LightCurve:
     """Search MAST for Kepler long-cadence data, download it, and stitch quarters together.
 
     download_dir: where to cache the FITS files (default: lightkurve's cache in your home folder).
+    verbose: print progress (off for the dashboard, which may fetch from several threads at once).
     """
-    print(f"Searching MAST for {target}...")
+    log = print if verbose else (lambda *args: None)
+    log(f"Searching MAST for {target}...")
     results = lk.search_lightcurve(target, mission="Kepler", author="Kepler", exptime=1800)
     if len(results) == 0:
         raise LookupError(f"No Kepler long-cadence light curves found for '{target}'.")
 
-    print(f"Found {len(results)} quarter(s) of data.")
+    log(f"Found {len(results)} quarter(s) of data.")
     if max_quarters:
         results = results[:max_quarters]
 
-    print(f"Downloading {len(results)} quarter(s) (cached after the first run)...")
+    log(f"Downloading {len(results)} quarter(s) (cached after the first run)...")
     collection = results.download_all(download_dir=download_dir)
     if collection is None or len(collection) == 0:
-        raise RuntimeError(f"Download failed for '{target}'.")
+        raise ConnectionError(f"Download failed for '{target}'.")
 
     # stitch() normalizes each quarter to ~1.0, then joins them into one light curve
     return collection.stitch().remove_nans()
