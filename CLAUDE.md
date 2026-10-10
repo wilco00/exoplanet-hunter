@@ -4,6 +4,19 @@ Portfolio project: an AI pipeline that classifies NASA Kepler transit signals as
 planets or false positives, from raw light curves to a public web dashboard.
 Owner: Will (UGA CS, Dec 2026). Windows, PowerShell, Python venv at `.venv/`.
 
+## Repository
+
+- **Public on GitHub:** https://github.com/wilco00/exoplanet-hunter. Branch `main` tracks `origin/main`
+  (renamed from `master` before the first push). Anything committed is public; check for secrets and personal
+  data before pushing.
+- **Remote URL pins the account:** `https://wilco00@github.com/wilco00/exoplanet-hunter.git`. Git Credential
+  Manager also holds a login for a different GitHub account that can't push here (403). Keep the
+  `wilco00@` in the URL; don't sign out or replace the other account's credential.
+- **Commit email** is the GitHub noreply address, set in this repo's git config
+  (`143106821+wilco00@users.noreply.github.com`), so the personal Gmail never appears in public history.
+  History was rewritten once before the first push to remove it.
+- **Don't rewrite pushed history** (no amend/rebase/filter-branch/force-push on `main`); add new commits instead.
+
 ## How Will wants to work (follow these)
 
 - Ask scope questions before starting anything new; present a plan and get approval before building.
